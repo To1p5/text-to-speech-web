@@ -11,39 +11,59 @@ from threading import Thread, Lock
 import time
 from gtts import gTTS
 import io
+from pydub import AudioSegment
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'
 
 class TextToSpeech:
     def __init__(self):
+        # Initialize all attributes first
+        self.speed = 150
         self.engine = None
-        self.init_engine()
         self.is_playing = False
         self.current_text = ""
         self.current_title = ""
         self.current_type = ""
         self.progress = 0
-        self.speed = 150
         self.current_sentence_index = 0
         self.sentences = []
         self.lock = Lock()
         self.should_stop = False
+        self.temp_dir = os.path.join(os.getcwd(), 'temp_audio')
+        if not os.path.exists(self.temp_dir):
+            os.makedirs(self.temp_dir)
+        # Initialize engine after all attributes are set
+        try:
+            self.init_engine()
+        except Exception as e:
+            print(f"Error during initialization: {str(e)}")
 
     def init_engine(self):
         """Initialize or reinitialize the TTS engine"""
-        if self.engine:
-            self.engine.stop()
-        self.engine = pyttsx3.init()
-        self.setup_voice()
+        try:
+            if self.engine:
+                try:
+                    self.engine.stop()
+                except:
+                    pass
+            self.engine = pyttsx3.init()
+            self.setup_voice()
+        except Exception as e:
+            print(f"Error initializing engine: {str(e)}")
 
     def setup_voice(self):
         """Configure the TTS engine settings"""
-        self.engine.setProperty('rate', self.speed)
-        self.engine.setProperty('volume', 0.9)
-        voices = self.engine.getProperty('voices')
-        if voices:
-            self.engine.setProperty('voice', voices[1].id)
+        try:
+            if not hasattr(self, 'speed'):
+                self.speed = 150
+            self.engine.setProperty('rate', self.speed)
+            self.engine.setProperty('volume', 0.9)
+            voices = self.engine.getProperty('voices')
+            if voices:
+                self.engine.setProperty('voice', voices[0].id)
+        except Exception as e:
+            print(f"Error setting up voice: {str(e)}")
 
     def set_speed(self, speed):
         """Set the speech rate"""
@@ -92,6 +112,25 @@ class TextToSpeech:
         self.progress = 0
         self.should_stop = False
 
+    def generate_audio_file(self, text, output_path):
+        """Generate audio file from text"""
+        try:
+            # Save as WAV first
+            wav_path = output_path.replace('.mp3', '.wav')
+            self.engine.save_to_file(text, wav_path)
+            self.engine.runAndWait()
+
+            # Convert to MP3
+            sound = AudioSegment.from_wav(wav_path)
+            sound.export(output_path, format="mp3")
+
+            # Cleanup WAV file
+            os.remove(wav_path)
+            return True
+        except Exception as e:
+            print(f"Error generating audio: {str(e)}")
+            return False
+
     def read_text(self, text, title, type_):
         """Read the given text aloud"""
         with self.lock:
@@ -99,21 +138,39 @@ class TextToSpeech:
             self.prepare_text(text, title, type_)
             self.is_playing = True
             
-            while self.current_sentence_index < len(self.sentences) and not self.should_stop:
-                if not self.is_playing:
-                    break
-                    
-                sentence = self.sentences[self.current_sentence_index]
+            # Generate unique filename for this session
+            timestamp = int(time.time())
+            mp3_path = os.path.join(self.temp_dir, f'speech_{timestamp}.mp3')
+            
+            # Generate the audio file
+            if self.generate_audio_file(text, mp3_path):
                 try:
-                    self.engine.say(sentence)
-                    self.engine.runAndWait()
-                except RuntimeError:
-                    self.init_engine()
-                    continue
+                    # Play the generated MP3 file
+                    sound = AudioSegment.from_mp3(mp3_path)
+                    chunk_length = 500  # 500ms chunks
+                    chunks = len(sound) // chunk_length
                     
-                self.current_sentence_index += 1
-                self.progress = int((self.current_sentence_index / len(self.sentences)) * 100)
-
+                    for i in range(chunks):
+                        if not self.is_playing or self.should_stop:
+                            break
+                            
+                        chunk = sound[i*chunk_length:(i+1)*chunk_length]
+                        chunk_path = os.path.join(self.temp_dir, f'chunk_{timestamp}_{i}.mp3')
+                        chunk.export(chunk_path, format="mp3")
+                        
+                        # Update progress
+                        self.progress = int((i / chunks) * 100)
+                        
+                        # Cleanup chunk
+                        os.remove(chunk_path)
+                        
+                except Exception as e:
+                    print(f"Error during playback: {str(e)}")
+                finally:
+                    # Cleanup
+                    if os.path.exists(mp3_path):
+                        os.remove(mp3_path)
+            
             self.is_playing = False
             if self.should_stop:
                 self.progress = 0
@@ -148,11 +205,16 @@ class TextToSpeech:
         if not self.current_text:
             return None
             
-        tts = gTTS(text=self.current_text, lang='en')
-        mp3_fp = io.BytesIO()
-        tts.write_to_fp(mp3_fp)
-        mp3_fp.seek(0)
-        return mp3_fp
+        # Generate unique filename
+        timestamp = int(time.time())
+        mp3_path = os.path.join(self.temp_dir, f'export_{timestamp}.mp3')
+        
+        if self.generate_audio_file(self.current_text, mp3_path):
+            with open(mp3_path, 'rb') as f:
+                data = f.read()
+            os.remove(mp3_path)
+            return io.BytesIO(data)
+        return None
 
     def get_state(self):
         """Get the current player state"""
@@ -163,6 +225,19 @@ class TextToSpeech:
             'progress': self.progress,
             'speed': self.speed
         }
+
+    def __del__(self):
+        """Cleanup temporary files on object destruction"""
+        try:
+            if os.path.exists(self.temp_dir):
+                for file in os.listdir(self.temp_dir):
+                    try:
+                        os.remove(os.path.join(self.temp_dir, file))
+                    except:
+                        pass
+                os.rmdir(self.temp_dir)
+        except:
+            pass
 
 # Create a global TTS instance
 tts = TextToSpeech()
@@ -232,357 +307,225 @@ def home():
 
             body {
                 background: linear-gradient(135deg, #1e2024 0%, #17181c 100%);
+                color: #ffffff;
                 min-height: 100vh;
                 padding: 2rem;
-                color: #ffffff;
             }
 
             .container {
                 max-width: 800px;
                 margin: 0 auto;
-                background: rgba(255, 255, 255, 0.1);
-                border-radius: 20px;
                 padding: 2rem;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 1rem;
                 backdrop-filter: blur(10px);
-                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
             }
 
             h1 {
                 text-align: center;
-                color: #ffffff;
-                font-size: 2.5rem;
                 margin-bottom: 2rem;
-                font-weight: 600;
+                color: #fff;
+                font-size: 2.5rem;
             }
 
-            .section {
-                background: rgba(255, 255, 255, 0.05);
-                border-radius: 12px;
-                padding: 1.5rem;
-                margin-bottom: 1.5rem;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                transition: transform 0.2s ease, box-shadow 0.2s ease;
+            .upload-section {
+                margin-bottom: 2rem;
+                padding: 2rem;
+                border-radius: 0.5rem;
+                background: rgba(255, 255, 255, 0.1);
             }
 
-            .section:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-                background: rgba(255, 255, 255, 0.08);
-            }
-
-            h2 {
-                color: #ffffff;
-                font-size: 1.5rem;
+            .upload-section h2 {
                 margin-bottom: 1rem;
-                font-weight: 500;
-                display: flex;
-                align-items: center;
-                gap: 0.5rem;
-            }
-
-            .icon {
                 font-size: 1.5rem;
-                color: #1db954;
             }
 
-            input[type="file"],
-            input[type="url"] {
-                width: 100%;
-                padding: 0.75rem;
-                margin: 0.5rem 0;
-                border: 2px solid rgba(255, 255, 255, 0.1);
-                border-radius: 8px;
-                font-size: 1rem;
-                background: rgba(255, 255, 255, 0.05);
-                color: #ffffff;
-                transition: border-color 0.2s ease;
+            .file-upload {
+                display: flex;
+                flex-direction: column;
+                gap: 1rem;
+                margin-bottom: 1rem;
             }
 
-            input[type="file"]:hover,
-            input[type="url"]:hover {
-                border-color: #1db954;
-            }
-
-            input[type="url"]::placeholder {
-                color: rgba(255, 255, 255, 0.5);
-            }
-
-            input[type="file"]::file-selector-button {
-                background: #1db954;
-                color: white;
-                padding: 0.5rem 1rem;
+            input[type="file"], input[type="url"] {
+                padding: 0.5rem;
                 border: none;
-                border-radius: 6px;
-                cursor: pointer;
-                margin-right: 1rem;
-                transition: background 0.2s ease;
-            }
-
-            input[type="file"]::file-selector-button:hover {
-                background: #1ed760;
+                border-radius: 0.25rem;
+                background: rgba(255, 255, 255, 0.2);
+                color: #fff;
             }
 
             button {
-                background: #1db954;
-                color: white;
                 padding: 0.75rem 1.5rem;
                 border: none;
-                border-radius: 8px;
+                border-radius: 0.25rem;
+                background: #2ecc71;
+                color: white;
                 cursor: pointer;
-                font-size: 1rem;
                 font-weight: 500;
-                width: 100%;
-                transition: all 0.2s ease;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 0.5rem;
+                transition: background 0.3s ease;
             }
 
             button:hover {
-                background: #1ed760;
-                transform: translateY(-1px);
+                background: #27ae60;
             }
 
-            button:active {
-                transform: translateY(0);
+            .controls {
+                display: flex;
+                gap: 1rem;
+                margin-top: 2rem;
+                justify-content: center;
             }
 
-            .loading {
-                display: none;
+            .speed-control {
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+                margin-top: 1rem;
+            }
+
+            input[type="range"] {
+                flex: 1;
+            }
+
+            .progress-bar {
+                width: 100%;
+                height: 4px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 2px;
                 margin: 1rem 0;
-                text-align: center;
-                color: #1db954;
+                overflow: hidden;
+            }
+
+            .progress {
+                width: 0%;
+                height: 100%;
+                background: #2ecc71;
+                transition: width 0.3s ease;
             }
 
             .status {
+                text-align: center;
                 margin-top: 1rem;
-                padding: 1rem;
-                border-radius: 8px;
-                display: none;
+                color: rgba(255, 255, 255, 0.7);
             }
 
-            .status.success {
-                background: rgba(29, 185, 84, 0.1);
-                color: #1db954;
-                display: block;
-            }
-
-            .status.error {
-                background: rgba(255, 55, 55, 0.1);
-                color: #ff3737;
-                display: block;
-            }
-
-            .mini-player {
-                position: fixed;
-                bottom: 0;
-                left: 0;
-                right: 0;
-                background: rgba(24, 24, 24, 0.98);
-                padding: 1rem;
-                display: none;
-                align-items: center;
-                justify-content: space-between;
-                backdrop-filter: blur(10px);
-                border-top: 1px solid rgba(255, 255, 255, 0.1);
-            }
-
-            .mini-player.active {
-                display: flex;
-            }
-
-            .mini-player-info {
-                display: flex;
-                align-items: center;
-                gap: 1rem;
-            }
-
-            .mini-player-controls {
-                display: flex;
-                align-items: center;
-                gap: 1rem;
-            }
-
-            .mini-player button {
-                width: auto;
+            #urlInput {
+                width: 100%;
                 padding: 0.5rem;
-                background: transparent;
-            }
-
-            .mini-player button:hover {
-                background: rgba(255, 255, 255, 0.1);
-                transform: none;
-            }
-
-            @media (max-width: 640px) {
-                body {
-                    padding: 1rem;
-                }
-
-                .container {
-                    padding: 1rem;
-                }
-
-                h1 {
-                    font-size: 2rem;
-                }
-
-                .mini-player {
-                    flex-direction: column;
-                    gap: 1rem;
-                }
+                margin-bottom: 1rem;
             }
         </style>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     </head>
     <body>
         <div class="container">
             <h1>Text to Speech</h1>
             
-            <div class="section">
-                <h2><i class="fas fa-file-pdf icon"></i> Read PDF</h2>
-                <input type="file" id="pdfFile" accept=".pdf">
-                <button onclick="uploadFile('pdf')">
-                    <i class="fas fa-play"></i>
-                    Read PDF
-                </button>
-                <div id="pdfStatus" class="status"></div>
-                <div id="pdfLoading" class="loading">
-                    <i class="fas fa-spinner fa-spin"></i> Processing...
+            <div class="upload-section">
+                <h2>Upload PDF</h2>
+                <div class="file-upload">
+                    <input type="file" id="pdfFile" accept=".pdf">
+                    <button onclick="uploadPDF()">Upload & Read PDF</button>
                 </div>
             </div>
 
-            <div class="section">
-                <h2><i class="fas fa-book icon"></i> Read EPUB</h2>
-                <input type="file" id="epubFile" accept=".epub">
-                <button onclick="uploadFile('epub')">
-                    <i class="fas fa-play"></i>
-                    Read EPUB
-                </button>
-                <div id="epubStatus" class="status"></div>
-                <div id="epubLoading" class="loading">
-                    <i class="fas fa-spinner fa-spin"></i> Processing...
+            <div class="upload-section">
+                <h2>Upload EPUB</h2>
+                <div class="file-upload">
+                    <input type="file" id="epubFile" accept=".epub">
+                    <button onclick="uploadEPUB()">Upload & Read EPUB</button>
                 </div>
             </div>
 
-            <div class="section">
-                <h2><i class="fas fa-globe icon"></i> Read Web Article</h2>
-                <input type="url" id="urlInput" placeholder="Enter article URL">
-                <button onclick="readURL()">
-                    <i class="fas fa-play"></i>
-                    Read URL
-                </button>
-                <div id="urlStatus" class="status"></div>
-                <div id="urlLoading" class="loading">
-                    <i class="fas fa-spinner fa-spin"></i> Processing...
-                </div>
+            <div class="upload-section">
+                <h2>Read from URL</h2>
+                <input type="url" id="urlInput" placeholder="Enter URL">
+                <button onclick="readURL()">Read from URL</button>
             </div>
-        </div>
 
-        <div id="miniPlayer" class="mini-player">
-            <div class="mini-player-info">
-                <i class="fas fa-music icon"></i>
-                <div>
-                    <h3 id="playerTitle">Not Playing</h3>
-                    <p id="playerType"></p>
-                </div>
+            <div class="progress-bar">
+                <div class="progress" id="progress"></div>
             </div>
-            <div class="mini-player-controls">
-                <button onclick="togglePlayPause()" id="playPauseBtn">
-                    <i class="fas fa-play"></i>
-                </button>
-                <button onclick="window.location.href='/player'">
-                    <i class="fas fa-expand"></i>
-                </button>
+
+            <div class="status" id="status">Ready</div>
+
+            <div class="controls">
+                <button onclick="togglePlayback()" id="playPauseBtn">Play</button>
+                <button onclick="stopPlayback()">Stop</button>
+                <button onclick="exportMP3()">Export MP3</button>
+            </div>
+
+            <div class="speed-control">
+                <span>Speed:</span>
+                <input type="range" id="speedControl" min="50" max="300" value="150" oninput="updateSpeed(this.value)">
+                <span id="speedValue">150</span>
             </div>
         </div>
 
         <script>
             let isPlaying = false;
 
-            function showLoading(type) {
-                document.getElementById(type + 'Loading').style.display = 'block';
-                document.getElementById(type + 'Status').style.display = 'none';
+            function updatePlayerState() {
+                fetch('/player_state')
+                    .then(response => response.json())
+                    .then(data => {
+                        isPlaying = data.is_playing;
+                        document.getElementById('playPauseBtn').textContent = isPlaying ? 'Pause' : 'Play';
+                        document.getElementById('progress').style.width = data.progress + '%';
+                        document.getElementById('status').textContent = data.current_title 
+                            ? `Playing: ${data.current_title} (${data.current_type})`
+                            : 'Ready';
+                        document.getElementById('speedControl').value = data.speed;
+                        document.getElementById('speedValue').textContent = data.speed;
+                    });
             }
 
-            function hideLoading(type) {
-                document.getElementById(type + 'Loading').style.display = 'none';
-            }
-
-            function showStatus(type, message, isError = false) {
-                const statusElement = document.getElementById(type + 'Status');
-                statusElement.textContent = message;
-                statusElement.className = 'status ' + (isError ? 'error' : 'success');
-                statusElement.style.display = 'block';
-            }
-
-            function updateMiniPlayer(title, type, playing) {
-                const miniPlayer = document.getElementById('miniPlayer');
-                const playerTitle = document.getElementById('playerTitle');
-                const playerType = document.getElementById('playerType');
-                const playPauseBtn = document.getElementById('playPauseBtn');
-
-                miniPlayer.classList.add('active');
-                playerTitle.textContent = title;
-                playerType.textContent = type;
-                playPauseBtn.innerHTML = playing ? 
-                    '<i class="fas fa-pause"></i>' : 
-                    '<i class="fas fa-play"></i>';
-                isPlaying = playing;
-            }
-
-            function togglePlayPause() {
-                fetch('/toggle_playback', {
-                    method: 'POST'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    updateMiniPlayer(data.current_title, data.current_type, data.is_playing);
-                });
-            }
-
-            function uploadFile(type) {
-                const fileInput = document.getElementById(type + 'File');
+            function uploadPDF() {
+                const fileInput = document.getElementById('pdfFile');
                 const file = fileInput.files[0];
-                if (!file) {
-                    showStatus(type, 'Please select a file first', true);
-                    return;
-                }
+                if (!file) return;
 
-                showLoading(type);
                 const formData = new FormData();
                 formData.append('file', file);
 
-                fetch('/' + type, {
+                fetch('/pdf', {
                     method: 'POST',
                     body: formData
                 })
                 .then(response => response.json())
                 .then(data => {
-                    hideLoading(type);
-                    if (data.status === 'success') {
-                        showStatus(type, 'Started reading the file');
-                        updateMiniPlayer(file.name, type.toUpperCase(), true);
-                        window.location.href = '/player';
-                    } else {
-                        showStatus(type, 'Error: ' + data.message, true);
+                    if (data.status === 'error') {
+                        alert(data.message);
                     }
+                    updatePlayerState();
+                });
+            }
+
+            function uploadEPUB() {
+                const fileInput = document.getElementById('epubFile');
+                const file = fileInput.files[0];
+                if (!file) return;
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                fetch('/epub', {
+                    method: 'POST',
+                    body: formData
                 })
-                .catch(error => {
-                    hideLoading(type);
-                    showStatus(type, 'Error: ' + error.message, true);
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'error') {
+                        alert(data.message);
+                    }
+                    updatePlayerState();
                 });
             }
 
             function readURL() {
                 const url = document.getElementById('urlInput').value;
-                if (!url) {
-                    showStatus('url', 'Please enter a URL', true);
-                    return;
-                }
+                if (!url) return;
 
-                showLoading('url');
                 fetch('/url', {
                     method: 'POST',
                     headers: {
@@ -592,31 +535,56 @@ def home():
                 })
                 .then(response => response.json())
                 .then(data => {
-                    hideLoading('url');
-                    if (data.status === 'success') {
-                        showStatus('url', 'Started reading the webpage');
-                        updateMiniPlayer('Web Article', 'URL', true);
-                        window.location.href = '/player';
-                    } else {
-                        showStatus('url', 'Error: ' + data.message, true);
+                    if (data.status === 'error') {
+                        alert(data.message);
                     }
-                })
-                .catch(error => {
-                    hideLoading('url');
-                    showStatus('url', 'Error: ' + error.message, true);
+                    updatePlayerState();
                 });
             }
 
-            // Check player state periodically
-            setInterval(() => {
-                fetch('/player_state')
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.current_title) {
-                            updateMiniPlayer(data.current_title, data.current_type, data.is_playing);
-                        }
-                    });
-            }, 1000);
+            function togglePlayback() {
+                fetch('/toggle_playback', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    updatePlayerState();
+                });
+            }
+
+            function stopPlayback() {
+                fetch('/stop_playback', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    updatePlayerState();
+                });
+            }
+
+            function updateSpeed(speed) {
+                document.getElementById('speedValue').textContent = speed;
+                fetch('/set_speed', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({speed: parseInt(speed)})
+                })
+                .then(response => response.json())
+                .then(data => {
+                    updatePlayerState();
+                });
+            }
+
+            function exportMP3() {
+                window.location.href = '/export_mp3';
+            }
+
+            // Update player state every second
+            setInterval(updatePlayerState, 1000);
+            // Initial state update
+            updatePlayerState();
         </script>
     </body>
     </html>

@@ -1,52 +1,87 @@
-# Text-to-Speech Application
+# Text-to-Speech Web Application
 
-A web-based application that can read PDFs, EPUBs, and web articles aloud using text-to-speech technology.
+A modern web application that converts PDFs, EPUBs, and web articles into speech. Built with Python and Flask, featuring a beautiful Spotify-like interface.
 
 ## Features
 
-- PDF file reading
-- EPUB file reading
-- Web article reading
-- Clean and simple web interface
-- Adjustable speech settings
+- 📚 Support for multiple file formats:
+  - PDF documents
+  - EPUB ebooks
+  - Web articles (via URL)
+- 🎧 Advanced playback controls:
+  - Play/Pause
+  - Stop
+  - Speed control (0.5x to 3x)
+- 💾 Export to MP3
+- 🎨 Modern, responsive UI
+- 🔊 High-quality text-to-speech
+- 📱 Mobile-friendly design
 
-## Setup Instructions
+## Screenshots
 
-1. Make sure you have Python 3.7+ installed on your system.
+(Add screenshots of your application here)
 
-2. Install the required dependencies:
+## Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/text-to-speech-web.git
+cd text-to-speech-web
+```
+
+2. Create a virtual environment (recommended):
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install the required dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Run the application:
+## Usage
+
+1. Start the application:
 ```bash
 python text_to_speech.py
 ```
 
-4. Open your web browser and navigate to:
+2. Open your web browser and navigate to:
 ```
 http://localhost:5000
 ```
 
-## Usage
+3. Use the application:
+   - Upload PDF files
+   - Upload EPUB files
+   - Enter URLs to read web articles
+   - Control playback with the player interface
+   - Export to MP3 when needed
 
-1. **Reading PDFs:**
-   - Click on the PDF section
-   - Select a PDF file from your computer
-   - Click "Read PDF" to start reading
+## Dependencies
 
-2. **Reading EPUBs:**
-   - Click on the EPUB section
-   - Select an EPUB file from your computer
-   - Click "Read EPUB" to start reading
+- Flask
+- pyttsx3
+- PyPDF2
+- beautifulsoup4
+- requests
+- ebooklib
+- gTTS
 
-3. **Reading Web Articles:**
-   - Enter the URL of the article you want to read
-   - Click "Read URL" to start reading
+## Contributing
 
-## Notes
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-- The application uses temporary storage for uploaded files, which are automatically deleted after processing
-- Make sure your system has a working audio output device
-- The application uses the system's text-to-speech engine 
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Inspired by Speechify and other text-to-speech applications
+- UI design inspired by Spotify's clean interface
