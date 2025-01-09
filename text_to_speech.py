@@ -71,51 +71,33 @@ class TextToSpeech:
             print(f"Error setting up voice: {str(e)}")
 
     def set_speed(self, speed):
-        """Set the speech rate"""
+        """Set the playback speed"""
         try:
             print(f"Setting speed to: {speed}")
-            old_speed = self.speed
+            
+            # Store current playback state and position
+            was_playing = self.player.is_playing()
+            current_time = self.player.get_time()
+            
+            # Update speed property
             self.speed = speed
             
-            # Store current state
-            current_pos = self.current_position
-            was_playing = self.is_playing
+            # Convert speed value (100 = 1x) to VLC rate (1.0 = 1x)
+            vlc_rate = speed / 100.0
             
-            # Stop current playback
-            if was_playing:
-                self.pause()
+            # Set the new rate without stopping playback
+            self.player.set_rate(vlc_rate)
             
-            # Update engine speed
-            self.engine.setProperty('rate', speed)
+            # If playback was interrupted, resume it
+            if was_playing and not self.player.is_playing():
+                self.player.play()
+                if current_time > 0:
+                    self.player.set_time(current_time)
             
-            # Regenerate audio at new speed
-            if self.current_text:
-                print("Regenerating audio with new speed...")
-                # Save current audio path
-                old_path = self.current_audio_path
-                
-                # Generate new audio
-                if self.generate_audio_file(self.current_text, self.current_title, self.current_type):
-                    print("Successfully generated new audio")
-                    # Remove old audio file
-                    if old_path and os.path.exists(old_path):
-                        os.remove(old_path)
-                    
-                    # Resume from previous position if was playing
-                    if was_playing:
-                        print("Resuming playback at new speed...")
-                        self.seek(current_pos)
-                        self.play()
-                else:
-                    print("Failed to generate new audio, restoring old speed")
-                    # If generation failed, restore old speed
-                    self.speed = old_speed
-                    self.engine.setProperty('rate', old_speed)
-                    
+            return True
         except Exception as e:
             print(f"Error setting speed: {str(e)}")
-            self.speed = old_speed
-            self.engine.setProperty('rate', old_speed)
+            return False
 
     def extract_from_pdf(self, pdf_path):
         try:
