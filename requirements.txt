@@ -6,4 +6,7 @@ ebooklib==0.18
 flask==2.3.3
 python-docx==1.0.1
 pydub==0.25.1
-gTTS==2.4.0 
+gTTS==2.4.0
+soundfile==0.12.1
+numpy==1.26.2
+simpleaudio==1.0.4 
