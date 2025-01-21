@@ -3,7 +3,7 @@ import PyPDF2
 from pydub import AudioSegment
 import os
 
-#Bob Bob Bob jom tough guy
+#Bob Bob Bob jom tough guy Make a new definition
 def create_audio(file_path, output_name):
     # Initialize speaker
     speaker = pyttsx3.init()
