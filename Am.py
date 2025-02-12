@@ -7,7 +7,7 @@ import os
 def create_audio(file_path, output_name):
     # Initialize speaker
     speaker = pyttsx3.init()
-    speaker.setProperty('rate', 150)  # Speed percent
+    speaker.setProperty('rate', 150)  # Speed percent devin
     speaker.setProperty('volume', 0.9)  # Volume
 
     def process_text(file_path):
